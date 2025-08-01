@@ -1,0 +1,16 @@
+services:
+  app:
+    build: .
+    command: npm run start:dev
+    volumes:
+      - .:/usr/src/app
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgresql://user:password@postgres:5432/auctiondb
+      REDIS_URL: redis://redis:6379
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+    depends_on:
+      - postgres
+      - redis
+      - rabbitmq
