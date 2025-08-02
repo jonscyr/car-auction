@@ -32,8 +32,8 @@ async function main() {
         carId: 'car123',
         startTime: new Date(Date.now() - 1000 * 60 * 10), // started 10 mins ago
         endTime: new Date(Date.now() + 1000 * 60 * 20), // ends in 20 mins
-        startingBid: 5000,
-        currentHighestBid: 5000,
+        startingBid: 6000,
+        currentHighestBid: null,
         winnerId: null,
         status: 'ONGOING',
       },
@@ -42,8 +42,8 @@ async function main() {
         carId: 'car124',
         startTime: new Date(Date.now() - 1000 * 60 * 20), // started 20 mins ago
         endTime: new Date(Date.now() + 1000 * 60 * 10), // ends in 10 mins
-        startingBid: 5000,
-        currentHighestBid: 5000,
+        startingBid: 1000,
+        currentHighestBid: null,
         winnerId: null,
         status: 'ONGOING',
       },
@@ -52,8 +52,8 @@ async function main() {
         carId: 'car125',
         startTime: new Date(Date.now() + 1000 * 60 * 10), // starts in 10 mins
         endTime: new Date(Date.now() + 1000 * 60 * 30), // ends in 30 mins
-        startingBid: 5000,
-        currentHighestBid: 5000,
+        startingBid: 3000,
+        currentHighestBid: null,
         winnerId: null,
         status: 'PENDING',
       },
@@ -62,8 +62,8 @@ async function main() {
         carId: 'car115',
         startTime: new Date(Date.now() - 1000 * 60 * 30), // started 30 mins ago
         endTime: new Date(Date.now() - 1000 * 10 * 30), // ended in 10 mins
-        startingBid: 5000,
-        currentHighestBid: 5000,
+        startingBid: 4000,
+        currentHighestBid: null,
         winnerId: null,
         status: 'PENDING',
       },

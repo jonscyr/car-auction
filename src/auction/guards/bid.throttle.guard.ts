@@ -2,17 +2,17 @@ import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
 import { RedisService } from 'src/common/redis/redis.service';
 import { Socket } from 'socket.io';
 import { WsException } from '@nestjs/websockets';
-
 @Injectable()
 export class BidThrottleGuard implements CanActivate {
   constructor(private readonly redisService: RedisService) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    const client: Socket = context.switchToWs().getClient();
+    const client: Socket = context.switchToWs().getClient<Socket>();
     const data = context.switchToWs().getData();
+    const userId = client.handshake.headers.userid as string;
 
     const auctionId = data.auctionId;
-    const userId = data.userId;
+    // const userId = data.userId;
 
     if (!auctionId || !userId)
       throw new WsException({

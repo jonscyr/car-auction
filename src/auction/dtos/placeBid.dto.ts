@@ -5,9 +5,9 @@ export class PlaceBidDto {
   @IsNotEmpty()
   auctionId: string;
 
-  @IsString()
-  @IsNotEmpty()
-  userId: string;
+  // @IsString()
+  // @IsNotEmpty()
+  // userId: string;
 
   @IsString()
   @IsNotEmpty()

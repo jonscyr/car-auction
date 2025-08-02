@@ -4,18 +4,20 @@ import {
   WebSocketServer,
   MessageBody,
   ConnectedSocket,
+  WsException,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { AuctionService } from './auction.service';
 import { RedisPubSubService } from 'src/common/redis/redis.pubsub.service';
 import { Logger, UseGuards } from '@nestjs/common';
 import { WsJwtAuthGuard } from './guards/jwt.validation.guard';
+import type { AuthenticatedSocket } from './guards/jwt.validation.guard';
 import { AuctionIsActiveGuard } from './guards/isActive.guard';
-import { UsePipes, ValidationPipe } from '@nestjs/common';
 import { JoinAuctionDto } from './dtos/joinAuction.dto';
 import { RedisRateLimiterGuard } from './guards/ratelimit.guard';
 import { BidThrottleGuard } from './guards/bid.throttle.guard';
 import { PlaceBidDto } from './dtos/placeBid.dto';
+import { BidService } from 'src/bidding/bidding.service';
 
 @WebSocketGateway(3001, {
   namespace: '/auction',
@@ -27,6 +29,7 @@ export class AuctionGateway {
   private readonly logger = new Logger(AuctionGateway.name);
   constructor(
     private readonly auctionService: AuctionService,
+    private readonly bidService: BidService,
     private readonly redisPubSubService: RedisPubSubService,
   ) {}
 
@@ -44,6 +47,11 @@ export class AuctionGateway {
       const { auctionId, userId } = message;
       this.server.to(`auction-${auctionId}`).emit('userJoined', { userId });
     });
+    await this.redisPubSubService.subscribe('user-leaves', (message) => {
+      if (!message) return;
+      const { auctionId, userId } = message;
+      this.server.to(`auction-${auctionId}`).emit('userLeft', { userId });
+    });
 
     await this.redisPubSubService.subscribe('auction-updates', (message) => {
       if (!message) return;
@@ -56,34 +64,38 @@ export class AuctionGateway {
   @UseGuards(WsJwtAuthGuard, AuctionIsActiveGuard, RedisRateLimiterGuard)
   async handleJoinAuction(
     @MessageBody() data: JoinAuctionDto,
-    @ConnectedSocket() client: Socket,
+    @ConnectedSocket() client: AuthenticatedSocket,
   ) {
-    // 1. validate auction
-    const auction = await this.auctionService.getAuctionById(data.auctionId);
-    if (!auction) {
-      client.emit('error', { message: 'Auction not found' });
-      return;
+    const user = client.data.user;
+    // Validate if user is already in room using another client
+    const isInRoom = await this.auctionService.isUserInRoom(
+      data.auctionId,
+      user.id,
+    );
+    if (isInRoom) {
+      this.logger.warn('User is already in the auction room.');
+      throw new WsException({
+        status: 'error',
+        message: 'User is already in the auction room',
+      });
     }
-    if (!this.auctionService.isAuctionActive(auction)) {
-      client.emit('error', { message: 'Auction not active' });
-      return;
-    }
-    // 2. add user client to auction room for future notifs
+
+    // 1. add user client to auction room for future notifs
     await client.join(`auction-${data.auctionId}`);
     await this.auctionService.addClientToRoom(
       data.auctionId,
       client.id,
-      data.userId,
+      user.id,
     );
 
-    // 3. respond ok
-    client.emit('joinedAuction', { auctionId: data.auctionId });
+    // 2. respond ok
+    client.emit('joinedAuction', JSON.stringify({ auctionId: data.auctionId }));
   }
 
   async handleDisconnect(client: Socket) {
-    this.logger.log(`Client disconnected: ${client.id}`);
     // Remove client from Redis client-room map
-    await this.auctionService.removeClientFromRoom(client.id);
+    await this.auctionService.removeClient(client.id);
+    this.logger.log(`Client disconnected: ${client.id}`);
   }
 
   @SubscribeMessage('placeBid')
@@ -96,14 +108,11 @@ export class AuctionGateway {
   async handlePlaceBid(
     @MessageBody()
     data: PlaceBidDto,
-    @ConnectedSocket() client: Socket,
+    @ConnectedSocket() client: AuthenticatedSocket,
   ) {
+    const user = client.data.user;
     // rabbitmq
-    await this.auctionService.placeBid(
-      data.auctionId,
-      data.userId,
-      data.bidAmount,
-    );
+    await this.bidService.placeBid(data.auctionId, user.id, data.bidAmount);
     client.emit('bidPlaced', { status: 'success', bidAmount: data.bidAmount });
   }
 

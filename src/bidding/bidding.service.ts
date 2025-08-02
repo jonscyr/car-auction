@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { WsException } from '@nestjs/websockets';
 import { PrismaClient } from '@prisma/client';
 import { Channel, ConsumeMessage } from 'amqplib';
 import { AuctionService } from 'src/auction/auction.service';
@@ -26,14 +27,21 @@ export class BidService {
       this.handleBidProcessing.bind(this),
     );
 
+    // Declare exchanges.
+    // separate exchange for auditing so that we can do exchange to exchange binding
     await this.channel.assertExchange('auction.exchange', 'direct', {
       durable: true,
     });
+    await this.channel.assertExchange('audit.fanout.exchange', 'fanout', {
+      durable: true,
+    });
+
+    // Queues
     await this.channel.assertQueue('bid-processing-queue', { durable: true });
     await this.channel.assertQueue('notification-queue', { durable: true });
     await this.channel.assertQueue('audit-queue', { durable: true });
-    await this.channel.assertQueue('dead-letter-queue', { durable: true });
 
+    // Bind Queues to auction.exchange (direct routing)
     await this.channel.bindQueue(
       'bid-processing-queue',
       'auction.exchange',
@@ -44,34 +52,38 @@ export class BidService {
       'auction.exchange',
       'notification',
     );
-    await this.channel.bindQueue('audit-queue', 'auction.exchange', 'audit');
-    await this.channel.bindQueue(
-      'dead-letter-queue',
+
+    // Bind audit-queue to audit.fanout.exchange
+    await this.channel.bindQueue('audit-queue', 'audit.fanout.exchange', '');
+
+    // Exchange-to-Exchange Binding: auction.exchange → audit.fanout.exchange
+    await this.channel.bindExchange(
+      'audit.fanout.exchange',
       'auction.exchange',
-      'dlq',
+      '',
     );
   }
 
-  publishBidEvent(message: any) {
-    const payload = Buffer.from(JSON.stringify(message));
-    this.channel.publish('auction.exchange', 'bid', payload);
-  }
+  // publishBidEvent(message: any) {
+  //   const payload = Buffer.from(JSON.stringify(message));
+  //   this.channel.publish('auction.exchange', 'bid', payload);
+  // }
 
-  publishNotificationEvent(message: any) {
-    const payload = Buffer.from(JSON.stringify(message));
-    this.channel.publish('auction.exchange', 'notification', payload);
-  }
+  // publishNotificationEvent(message: any) {
+  //   const payload = Buffer.from(JSON.stringify(message));
+  //   this.channel.publish('auction.exchange', 'notification', payload);
+  // }
 
-  publishAuditEvent(message: any) {
-    const payload = Buffer.from(JSON.stringify(message));
-    this.channel.publish('auction.exchange', 'audit', payload);
-  }
+  // publishAuditEvent(message: any) {
+  //   const payload = Buffer.from(JSON.stringify(message));
+  //   this.channel.publish('auction.exchange', 'audit', payload);
+  // }
 
-  async getCurrentHighestBid(auctionId: string): Promise<number> {
+  async getCurrentHighestBid(auctionId: string): Promise<number | null> {
     const bid = await this.redisCache.client.get(
       `auction:${auctionId}:highestBid`,
     );
-    return bid ? parseFloat(bid) : 0;
+    return bid ? parseFloat(bid) : null;
   }
 
   async updateHighestBid(auctionId: string, bidAmount: number, userId: string) {
@@ -87,21 +99,19 @@ export class BidService {
 
   async placeBid(auctionId: string, userId: string, amount: number) {
     const auction = await this.auctionService.getAuctionById(auctionId);
-    if (!auction) throw new Error('Auction not found');
+    if (!auction) throw new WsException('Auction not found');
 
     const currentHighestBid = await this.getCurrentHighestBid(auctionId);
-    if (amount <= currentHighestBid) {
-      throw new Error('Bid must be higher than current highest bid');
+    if (!currentHighestBid) {
+      if (amount <= auction.startingBid) {
+        throw new WsException(
+          `Bid must be higher than auction's starting bid which is ${auction.startingBid}`,
+        );
+      }
+      // else we're good for placing the bid
+    } else if (amount <= currentHighestBid) {
+      throw new WsException('Bid must be higher than current highest bid');
     }
-
-    // await this.auctionService.updateAuctionBid(auctionId, amount, userId);
-
-    // await this.rabbitMQService.publishAuditEvent({
-    //   auctionId,
-    //   userId,
-    //   amount,
-    //   timestamp: Date.now(),
-    // });
 
     // Push the bid event to RabbitMQ for persistence and audit trail
     const payload = Buffer.from(
@@ -118,6 +128,9 @@ export class BidService {
   }
 
   private async handleBidProcessing(msg: ConsumeMessage) {
+    if (!msg) {
+      return;
+    }
     const { auctionId, userId, amount } = JSON.parse(msg.content.toString());
 
     // Save the bid in the Bids table
@@ -139,7 +152,5 @@ export class BidService {
       bidAmount: amount,
       userId,
     });
-
-    this.channel.ack(msg);
   }
 }

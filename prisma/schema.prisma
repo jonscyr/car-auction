@@ -20,7 +20,7 @@ model Auction {
   startTime         DateTime
   endTime           DateTime
   startingBid       Float
-  currentHighestBid Float
+  currentHighestBid Float?
   winnerId          String?
   status            String
   version           Int      @default(1)

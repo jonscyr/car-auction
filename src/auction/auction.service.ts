@@ -60,55 +60,121 @@ export class AuctionService {
     await this.redisService.client.del(cacheKey);
   }
 
-  private getRoomKey(auctionId: string): string {
-    return `auction:${auctionId}:clients`;
+  private getUserClientsKey(userId: string): string {
+    return `user:${userId}:clients`;
   }
 
-  private getClientKey(clientId: string): string {
+  private getAuctionUsersKey(auctionId: string): string {
+    return `auction:${auctionId}:users`;
+  }
+
+  private getClientAuctionKey(clientId: string): string {
     return `client:${clientId}:auction`;
   }
 
-  async addClientToRoom(auctionId: string, clientId: string, userId: string) {
-    await this.redisService.client.sAdd(this.getRoomKey(auctionId), clientId);
-    await this.redisService.client.set(this.getClientKey(clientId), auctionId);
-    await this.redisPubSub.publish('user-joins', {
-      auctionId: auctionId,
-      userId: userId,
-    });
+  private async getUserIdFromClient(clientId: string): Promise<string | null> {
+    const redis = this.redisService.client;
+    const userId = await redis.get(`client:${clientId}:user`);
+    return userId;
   }
 
-  async removeClientFromRoom(clientId: string) {
-    const auctionId = await this.redisService.client.get(
-      this.getClientKey(clientId),
+  async addClientToRoom(auctionId: string, clientId: string, userId: string) {
+    const redis = this.redisService.client;
+
+    // Track clientId under user
+    await redis.sAdd(this.getUserClientsKey(userId), clientId);
+
+    // Add user to auction room if not already present
+    await redis.sAdd(this.getAuctionUsersKey(auctionId), userId);
+
+    // Map clientId to auction for reverse lookup
+    await redis.set(this.getClientAuctionKey(clientId), auctionId);
+
+    // Map client to user id map
+    await redis.set(`client:${clientId}:user`, userId);
+
+    await this.redisPubSub.publish('user-joins', { auctionId, userId });
+  }
+
+  async removeUserFromRoom(auctionId: string, userId: string) {
+    const redis = this.redisService.client;
+
+    // Remove user from auction users set
+    await redis.sRem(this.getAuctionUsersKey(auctionId), userId);
+
+    // Get all clientIds of this user
+    const clientIds = await redis.sMembers(this.getUserClientsKey(userId));
+
+    // Remove all client-to-auction mappings
+    for (const clientId of clientIds) {
+      await redis.del(this.getClientAuctionKey(clientId));
+    }
+
+    // Delete the user's client set
+    await redis.del(this.getUserClientsKey(userId));
+
+    // Publish leave event
+    await this.redisPubSub.publish('user-leaves', { auctionId, userId });
+  }
+
+  async isUserInRoom(auctionId: string, userId: string): Promise<boolean> {
+    const redis = this.redisService.client;
+    const isMember = await redis.sIsMember(
+      this.getAuctionUsersKey(auctionId),
+      userId,
     );
-    if (auctionId) {
-      await this.redisService.client.sRem(this.getRoomKey(auctionId), clientId);
-      await this.redisService.client.del(this.getClientKey(clientId));
+    return isMember === 1;
+  }
+
+  async removeClient(clientId: string) {
+    const redis = this.redisService.client;
+
+    const auctionId = await redis.get(this.getClientAuctionKey(clientId));
+    if (!auctionId) return;
+
+    const userId = await this.getUserIdFromClient(clientId);
+    if (!userId) return;
+
+    // Remove clientId from user's active clients set
+    await redis.sRem(this.getUserClientsKey(userId), clientId);
+
+    // Delete clientId to auction mapping
+    await redis.del(this.getClientAuctionKey(clientId));
+
+    // Delete client - userid mapping
+    await redis.del(`client:${clientId}:user`);
+
+    // Check if user has any other active clients
+    const remainingClients = await redis.sCard(this.getUserClientsKey(userId));
+    if (remainingClients === 0) {
+      // Remove user from all auction rooms
+      const auctionKeys = await redis.keys('auction:*:users');
+      for (const key of auctionKeys) {
+        const isMember = await redis.sIsMember(key, userId);
+        if (isMember) {
+          await redis.sRem(key, userId);
+
+          const auctionIdMatch = key.match(/^auction:(.*):users$/);
+          const auctionId = auctionIdMatch ? auctionIdMatch[1] : null;
+
+          if (auctionId) {
+            await this.redisPubSub.publish('user-leaves', {
+              auctionId,
+              userId,
+            });
+          }
+        }
+      }
+
+      // Clean up user's client set
+      await redis.del(this.getUserClientsKey(userId));
     }
   }
 
-  async getClientsInRoom(auctionId: string): Promise<string[]> {
-    return this.redisService.client.sMembers(this.getRoomKey(auctionId));
-  }
+  //   async placeBid(auctionId: string, userId: string, bidAmount: number) {
+  //     this.logger.log(
+  //       `Placing bid for auction ${auctionId} by user ${userId}: $${bidAmount}`,
+  //     );
 
-  async isClientInRoom(auctionId: string, clientId: string): Promise<boolean> {
-    // TODO: use R.isNil
-    return !!(await this.redisService.client.sIsMember(
-      this.getRoomKey(auctionId),
-      clientId,
-    ));
-  }
-
-  async placeBid(auctionId: string, userId: string, bidAmount: number) {
-    this.logger.log(
-      `Placing bid for auction ${auctionId} by user ${userId}: $${bidAmount}`,
-    );
-
-    await this.rabbitMQService.publishToQueue('bid-processing-queue', {
-      auctionId,
-      userId,
-      bidAmount,
-      timestamp: new Date(),
-    });
-  }
+  //   }
 }

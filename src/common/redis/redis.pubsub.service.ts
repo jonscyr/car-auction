@@ -6,6 +6,7 @@ import { ConfigService } from '@nestjs/config';
 export class RedisPubSubService {
   public publisher: Redis;
   public subscriber: Redis;
+  private handlers: Map<string, (message: any) => void> = new Map();
 
   constructor(private readonly configService: ConfigService) {
     const redisUrl = this.configService.get<string>('REDIS_URL');
@@ -14,6 +15,14 @@ export class RedisPubSubService {
     }
     this.publisher = new Redis(redisUrl);
     this.subscriber = new Redis(redisUrl);
+
+    // Handle incoming messages
+    this.subscriber.on('message', (channel, message) => {
+      const handler = this.handlers.get(channel);
+      if (handler) {
+        handler(JSON.parse(message));
+      }
+    });
   }
 
   async publish(channel: string, message: any) {
@@ -21,8 +30,7 @@ export class RedisPubSubService {
   }
 
   async subscribe(channel: string, handler: (message: any) => void) {
-    await this.subscriber.subscribe(channel, (message) => {
-      handler(JSON.parse(message as unknown as string));
-    });
+    this.handlers.set(channel, handler);
+    await this.subscriber.subscribe(channel);
   }
 }

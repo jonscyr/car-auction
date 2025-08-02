@@ -1,6 +1,7 @@
 import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
 import { RedisService } from 'src/common/redis/redis.service';
 import { WsException } from '@nestjs/websockets';
+import { Socket } from 'socket.io';
 
 @Injectable()
 export class RedisRateLimiterGuard implements CanActivate {
@@ -9,8 +10,14 @@ export class RedisRateLimiterGuard implements CanActivate {
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const client = this.redisService.getClient();
 
-    const socket = context.switchToWs().getClient();
-    const userId = socket.handshake.query.userId as string; // or use token decoding logic
+    const socket = context.switchToWs().getClient<Socket>();
+    const userId = socket.handshake.headers.userid as string; // or use token decoding logic
+
+    if (!userId)
+      throw new WsException({
+        status: 'error',
+        message: 'No userId provided',
+      });
 
     const key = `rate-limit:${userId}`;
     const limit = 10; // max 10 events
