@@ -6,6 +6,7 @@ import * as Joi from 'joi';
 import { CommonModule } from './common/common.module';
 import { AuctionModule } from './auction/auction.module';
 import { BidModule } from './bidding/bid-processing.module';
+import { UserModule } from './user/user.module';
 
 @Module({
   imports: [
@@ -19,9 +20,10 @@ import { BidModule } from './bidding/bid-processing.module';
         RATE_LIMIT: Joi.number().default(5),
       }),
     }),
+    CommonModule,
     AuctionModule,
     BidModule,
-    CommonModule,
+    UserModule,
   ],
   providers: [RedisService, RabbitMQService],
 })

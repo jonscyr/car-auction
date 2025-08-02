@@ -1,10 +1,10 @@
 import { Module } from '@nestjs/common';
 import { BidService } from './bidding.service';
 import { CommonModule } from 'src/common/common.module';
-// import { AuctionModule } from 'src/auction/auction.module';
+import { AuctionService } from 'src/auction/auction.service';
 
 @Module({
-  providers: [BidService],
+  providers: [BidService, AuctionService],
   exports: [BidService],
   imports: [CommonModule],
 })

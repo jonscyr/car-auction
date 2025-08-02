@@ -4,8 +4,8 @@ import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class RedisPubSubService {
-  private publisher: Redis;
-  private subscriber: Redis;
+  public publisher: Redis;
+  public subscriber: Redis;
 
   constructor(private readonly configService: ConfigService) {
     const redisUrl = this.configService.get<string>('REDIS_URL');
@@ -16,22 +16,13 @@ export class RedisPubSubService {
     this.subscriber = new Redis(redisUrl);
   }
 
-  async publishBidUpdate(auctionId: number, bid: any): Promise<void> {
-    await this.publisher.publish(
-      `auction:${auctionId}:bids`,
-      JSON.stringify(bid),
-    );
+  async publish(channel: string, message: any) {
+    await this.publisher.publish(channel, JSON.stringify(message));
   }
 
-  async subscribeToBidUpdates(
-    auctionId: number,
-    handler: (message: any) => void,
-  ): Promise<void> {
-    await this.subscriber.subscribe(`auction:${auctionId}:bids`);
-    this.subscriber.on('message', (channel, message) => {
-      if (channel === `auction:${auctionId}:bids`) {
-        handler(JSON.parse(message));
-      }
+  async subscribe(channel: string, handler: (message: any) => void) {
+    await this.subscriber.subscribe(channel, (message) => {
+      handler(JSON.parse(message as unknown as string));
     });
   }
 }

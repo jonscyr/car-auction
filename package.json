@@ -29,6 +29,8 @@
     "@prisma/client": "^6.13.0",
     "@types/amqplib": "^0.10.7",
     "amqplib": "^0.10.8",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.14.2",
     "dotenv": "^17.2.1",
     "ioredis": "^5.7.0",
     "joi": "^17.13.3",
@@ -62,6 +64,9 @@
     "tsconfig-paths": "^4.2.0",
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.20.0"
+  },
+  "prisma": {
+    "seed": "ts-node prisma/seed.ts"
   },
   "jest": {
     "moduleFileExtensions": [

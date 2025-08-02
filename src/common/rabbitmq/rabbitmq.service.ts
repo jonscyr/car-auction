@@ -4,7 +4,7 @@ import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class RabbitMQService implements OnModuleInit {
-  private connection: ChannelModel;
+  public connection: ChannelModel;
   private channel: Channel;
   private readonly logger = new Logger(RabbitMQService.name);
 
@@ -49,7 +49,7 @@ export class RabbitMQService implements OnModuleInit {
   }
 
   async publishToQueue(queue: string, message: any) {
-    await this.channel.assertQueue(queue, { durable: true });
+    // await this.channel.assertQueue(queue, { durable: true });
     this.channel.publish(
       'auction.exchange',
       queue,
