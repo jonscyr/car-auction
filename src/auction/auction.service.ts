@@ -1,12 +1,17 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
 import { RedisService } from '../common/redis/redis.service';
+import { RabbitMQService } from 'src/common/rabbitmq/rabbitmq.service';
 
 @Injectable()
 export class AuctionService {
+  private readonly logger = new Logger(AuctionService.name);
   private readonly prisma: PrismaClient;
 
-  constructor(private readonly redisService: RedisService) {
+  constructor(
+    private readonly redisService: RedisService,
+    private readonly rabbitMQService: RabbitMQService,
+  ) {
     this.prisma = new PrismaClient();
   }
 
@@ -40,5 +45,18 @@ export class AuctionService {
         userId,
       }),
     );
+  }
+
+  async placeBid(auctionId: string, userId: string, bidAmount: number) {
+    this.logger.log(
+      `Placing bid for auction ${auctionId} by user ${userId}: $${bidAmount}`,
+    );
+
+    await this.rabbitMQService.publishToQueue('bid-processing-queue', {
+      auctionId,
+      userId,
+      bidAmount,
+      timestamp: new Date(),
+    });
   }
 }

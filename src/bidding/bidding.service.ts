@@ -1,22 +1,25 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { RabbitMQProducer } from '../common/rabbitmq/rabbitmq.producer';
+import { RabbitMQService } from 'src/common/rabbitmq/rabbitmq.service';
 
 @Injectable()
 export class BidService {
   private readonly logger = new Logger(BidService.name);
 
-  constructor(private readonly rabbitMQProducer: RabbitMQProducer) {}
+  constructor(private readonly rabbitMQService: RabbitMQService) {}
 
-  async placeBid(auctionId: string, userId: string, bidAmount: number) {
-    this.logger.log(
-      `Placing bid for auction ${auctionId} by user ${userId}: $${bidAmount}`,
+  async onModuleInit() {
+    await this.rabbitMQService.registerConsumer(
+      'bid-processing-queue',
+      this.handleBidProcessing.bind(this),
     );
+  }
 
-    await this.rabbitMQProducer.publishToQueue('bid-processing-queue', {
-      auctionId,
-      userId,
-      bidAmount,
-      timestamp: new Date(),
-    });
+  private handleBidProcessing(msg: any) {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+    const content = JSON.parse(msg.content.toString());
+    const { auctionId, userId, bidAmount } = content;
+
+    // Broadcast to WebSocket clients
+    // this.auctionGateway.broadcastBidUpdate(auctionId, bidAmount, userId);
   }
 }

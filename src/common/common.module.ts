@@ -1,16 +1,10 @@
 import { Module } from '@nestjs/common';
 import { RedisService } from './redis/redis.service';
-import { RabbitMQProducer } from './rabbitmq/rabbitmq.producer';
 import { PrismaService } from './prisma/prisma.service';
-import { RabbitMQSubscriber } from './rabbitmq/rabbitmq.subscriber';
+import { RabbitMQService } from './rabbitmq/rabbitmq.service';
 
 @Module({
-  providers: [
-    RedisService,
-    RabbitMQProducer,
-    PrismaService,
-    RabbitMQSubscriber,
-  ],
-  exports: [RedisService, RabbitMQProducer, PrismaService, RabbitMQSubscriber],
+  providers: [RedisService, PrismaService, RabbitMQService],
+  exports: [RedisService, PrismaService, RabbitMQService],
 })
 export class CommonModule {}

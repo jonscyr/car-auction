@@ -1,18 +1,14 @@
 import { Injectable, OnModuleInit, Logger } from '@nestjs/common';
 import { connect, ConsumeMessage, Channel, ChannelModel } from 'amqplib';
-import { AuctionGateway } from '../../auction/auction.gateway';
 import { ConfigService } from '@nestjs/config';
 
 @Injectable()
-export class RabbitMQSubscriber implements OnModuleInit {
+export class RabbitMQService implements OnModuleInit {
   private connection: ChannelModel;
   private channel: Channel;
-  private readonly logger = new Logger(RabbitMQSubscriber.name);
+  private readonly logger = new Logger(RabbitMQService.name);
 
-  constructor(
-    private readonly auctionGateway: AuctionGateway,
-    private readonly configService: ConfigService,
-  ) {}
+  constructor(private readonly configService: ConfigService) {}
 
   async onModuleInit() {
     const rabbitMQUrl = this.configService.get<string>('RABBITMQ_URL');
@@ -24,14 +20,9 @@ export class RabbitMQSubscriber implements OnModuleInit {
     this.channel = await this.connection.createChannel();
 
     await this.channel.assertQueue('bid-processing-queue', { durable: true });
-
-    await this.consumeQueue(
-      'bid-processing-queue',
-      this.handleBidProcessing.bind(this),
-    );
   }
 
-  private async consumeQueue(
+  async registerConsumer(
     queue: string,
     handler: (msg: ConsumeMessage) => Promise<void>,
   ) {
@@ -57,11 +48,12 @@ export class RabbitMQSubscriber implements OnModuleInit {
     );
   }
 
-  private handleBidProcessing(msg: ConsumeMessage) {
-    const content = JSON.parse(msg.content.toString());
-    const { auctionId, userId, bidAmount } = content;
-
-    // Broadcast to WebSocket clients
-    this.auctionGateway.broadcastBidUpdate(auctionId, bidAmount, userId);
+  async publishToQueue(queue: string, message: any) {
+    await this.channel.assertQueue(queue, { durable: true });
+    this.channel.publish(
+      'auction.exchange',
+      queue,
+      Buffer.from(JSON.stringify(message)),
+    );
   }
 }

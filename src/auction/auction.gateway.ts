@@ -6,21 +6,23 @@ import {
   ConnectedSocket,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { BidService } from '../bidding/bidding.service';
+import { AuctionService } from './auction.service';
 
-@WebSocketGateway({ namespace: '/auction', cors: true })
+@WebSocketGateway(3001, {
+  namespace: '/auction',
+})
 export class AuctionGateway {
   @WebSocketServer()
   server: Server;
 
-  constructor(private readonly bidService: BidService) {}
+  constructor(private readonly auctionService: AuctionService) {}
 
   @SubscribeMessage('joinAuction')
-  handleJoinAuction(
+  async handleJoinAuction(
     @MessageBody() data: { auctionId: string },
     @ConnectedSocket() client: Socket,
   ) {
-    client.join(`auction-${data.auctionId}`);
+    await client.join(`auction-${data.auctionId}`);
     client.emit('joinedAuction', { auctionId: data.auctionId });
   }
 
@@ -30,7 +32,11 @@ export class AuctionGateway {
     data: { auctionId: string; userId: string; bidAmount: number },
     @ConnectedSocket() client: Socket,
   ) {
-    await this.bidService.placeBid(data.auctionId, data.userId, data.bidAmount);
+    await this.auctionService.placeBid(
+      data.auctionId,
+      data.userId,
+      data.bidAmount,
+    );
     client.emit('bidPlaced', { status: 'success', bidAmount: data.bidAmount });
   }
 
@@ -38,5 +44,18 @@ export class AuctionGateway {
     this.server
       .to(`auction-${auctionId}`)
       .emit('bidUpdate', { auctionId, bidAmount, userId });
+  }
+
+  // 🟢 Broadcast Auction End to all clients in the room
+  broadcastAuctionEnd(
+    auctionId: string,
+    finalBidAmount: number,
+    winnerId: string,
+  ) {
+    this.server.to(`auction-${auctionId}`).emit('auctionEnded', {
+      auctionId,
+      finalBidAmount,
+      winnerId,
+    });
   }
 }
