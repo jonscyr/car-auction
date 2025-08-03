@@ -45,4 +45,21 @@ export class RabbitMQService implements OnModuleInit {
       { noAck: false },
     );
   }
+
+  async registerConsumerNoWrap(
+    queue: string,
+    handler: (msg: ConsumeMessage) => Promise<void>,
+  ) {
+    await this.channel.consume(
+      queue,
+      (msg) => {
+        void (async () => {
+          if (msg) {
+            await handler(msg);
+          }
+        })();
+      },
+      { noAck: false },
+    );
+  }
 }

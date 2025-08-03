@@ -34,7 +34,7 @@ export class BidService {
       'CONSUMER_QUEUE_ID',
     );
     if (typeof consumerQueueId === 'number' && !isNaN(consumerQueueId)) {
-      await this.rabbitMQService.registerConsumer(
+      await this.rabbitMQService.registerConsumerNoWrap(
         QUEUING.QUEUES.BID_PROCESSING_PREFIX + consumerQueueId,
         this.handleBidProcessing.bind(this),
       );
@@ -119,6 +119,10 @@ export class BidService {
     if (!msg) return;
     const parsedMsg = JSON.parse(msg.content.toString()) as PlaceBidEvent; // TODO: use typeguards;
     const { auctionId, userId, bidAmount } = parsedMsg.payload;
+    const headers = msg.properties.headers || {};
+    const retryCount = (headers['x-retry-count'] as number) || 0;
+    const MAX_RETRIES = 3;
+
     try {
       await this.prisma.$transaction(async (tx) => {
         // 1. Fetch the current auction row
@@ -189,7 +193,19 @@ export class BidService {
     } catch (error) {
       // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
       this.logger.error(`Bid processing failed: ${error.message}`, error.stack);
-
+      if (retryCount < MAX_RETRIES) {
+        // Republish to Retry Queue
+        const retryQueue = `${msg.fields.routingKey}.retry`;
+        this.channel.sendToQueue(retryQueue, msg.content, {
+          headers: { 'x-retry-count': retryCount + 1 },
+          persistent: true,
+        });
+        // Ack the failed message after republishing for retry
+        this.channel.ack(msg);
+      } else {
+        // Retries exhausted → nack without requeue → goes to DLQ
+        this.channel.nack(msg, false, false);
+      }
       // Conflict/Error Notification
       // we could also directly publish to redis pubsub for immediate feedback
       this.channel.publish(

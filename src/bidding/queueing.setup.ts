@@ -93,7 +93,7 @@ export const setupQueuesAndExchanges = async (
      * 2.4 Bind Main Queue to Consistent Hash Exchange
      * - This allows bid-processing queues to scale horizontally.
      */
-    await channel.bindQueue(bidQueueName, QUEUING.EXCHANGES.BID_X, '1'); // weight=1
+    await channel.bindQueue(bidQueueName, QUEUING.EXCHANGES.BID_HASH_X, '1'); // weight=1
   }
 
   /**
