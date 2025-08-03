@@ -1,15 +1,42 @@
 services:
-  app:
+  app1:
     build: .
-    command: npm run start:dev
+    command: npm run start:prod
     volumes:
       - .:/usr/src/app
     ports:
-      - "3000:3000"
+      - "3001:3000"
     environment:
       DATABASE_URL: postgresql://user:password@postgres:5432/auctiondb
       REDIS_URL: redis://redis:6379
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      CONSUMER_QUEUE_ID: 1
+    depends_on:
+      - postgres
+      - redis
+      - rabbitmq
+
+  app2:
+    image: app1  # Reuse built image from app1
+    command: npm run start:prod
+    environment:
+      DATABASE_URL: postgresql://user:password@postgres:5432/auctiondb
+      REDIS_URL: redis://redis:6379
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      CONSUMER_QUEUE_ID: 2
+    depends_on:
+      - postgres
+      - redis
+      - rabbitmq
+
+  app3:
+    image: app1
+    command: npm run start:prod
+    environment:
+      DATABASE_URL: postgresql://user:password@postgres:5432/auctiondb
+      REDIS_URL: redis://redis:6379
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      CONSUMER_QUEUE_ID: 3
     depends_on:
       - postgres
       - redis
