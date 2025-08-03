@@ -28,10 +28,8 @@ export class BidService {
 
   async onModuleInit() {
     this.channel = await this.rabbitMQService.connection.createChannel();
-    const numberOfBidQueues = this.configService.get<number | null>(
-      'N_CONSUMERS',
-    );
-    await setupQueuesAndExchanges(this.channel, numberOfBidQueues);
+    const numberOfBidQueues = this.configService.get<number>('N_CONSUMERS');
+    await setupQueuesAndExchanges(this.channel, numberOfBidQueues || 3);
     const consumerQueueId = this.configService.get<number | null>(
       'CONSUMER_QUEUE_ID',
     );
