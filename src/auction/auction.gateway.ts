@@ -18,6 +18,9 @@ import { RedisRateLimiterGuard } from './guards/ratelimit.guard';
 import { BidThrottleGuard } from './guards/bid.throttle.guard';
 import { PlaceBidDto } from './dtos/placeBid.dto';
 import { BidService } from 'src/bidding/bidding.service';
+import { PUBSUB_EVENTS } from 'src/pubsub.events';
+import { WEBSOCKET_EVENTS } from 'src/websocket.events';
+import { PlaceBidErrorEvent } from 'src/rabbitmq.events';
 
 @WebSocketGateway(3001, {
   namespace: '/auction',
@@ -34,54 +37,75 @@ export class AuctionGateway {
   ) {}
 
   async afterInit() {
-    await this.redisPubSubService.subscribe('bid-updates', (message) => {
-      if (!message) return;
-      const { auctionId, bidAmount, userId } = message;
-      this.server
-        .to(`auction-${auctionId}`)
-        .emit('bidUpdate', { auctionId, bidAmount, userId });
-    });
+    await this.redisPubSubService.subscribe(
+      PUBSUB_EVENTS.BID_UPDATES,
+      (message) => {
+        if (!message) return;
+        const { auctionId, bidAmount, userId } = message;
+        this.server
+          .to(`auction-${auctionId}`)
+          .emit(WEBSOCKET_EVENTS.BID_UPDATE, { auctionId, bidAmount, userId });
+      },
+    );
 
-    await this.redisPubSubService.subscribe('user-joins', (message) => {
-      if (!message) return;
-      const { auctionId, userId } = message;
-      this.server.to(`auction-${auctionId}`).emit('userJoined', { userId });
-    });
-    await this.redisPubSubService.subscribe('user-leaves', (message) => {
-      if (!message) return;
-      const { auctionId, userId } = message;
-      this.server.to(`auction-${auctionId}`).emit('userLeft', { userId });
-    });
+    await this.redisPubSubService.subscribe(
+      PUBSUB_EVENTS.USER_JOINS,
+      (message) => {
+        if (!message) return;
+        const { auctionId, userId } = message;
+        this.server
+          .to(`auction-${auctionId}`)
+          .emit(WEBSOCKET_EVENTS.USER_JOINED, { userId });
+      },
+    );
+    await this.redisPubSubService.subscribe(
+      PUBSUB_EVENTS.USER_LEAVES,
+      (message) => {
+        if (!message) return;
+        const { auctionId, userId } = message;
+        this.server
+          .to(`auction-${auctionId}`)
+          .emit(WEBSOCKET_EVENTS.USER_LEFT, { userId });
+      },
+    );
 
-    await this.redisPubSubService.subscribe('auction-updates', (message) => {
-      if (!message) return;
-      const { auctionId, finalBid } = message;
-      this.server.to(`auction-${auctionId}`).emit('auctionEnd', { finalBid });
-    });
-    await this.redisPubSubService.subscribe('bid-error', (message) => {
-      void (async () => {
-        try {
-          if (!message) return;
-          const { auctionId, userId, type, reason, amount } = message;
+    await this.redisPubSubService.subscribe(
+      PUBSUB_EVENTS.AUTCION_UPDATES,
+      (message) => {
+        if (!message) return;
+        const { auctionId, finalBid } = message;
+        this.server
+          .to(`auction-${auctionId}`)
+          .emit(WEBSOCKET_EVENTS.AUCTION_END, { finalBid });
+      },
+    );
+    await this.redisPubSubService.subscribe(
+      PUBSUB_EVENTS.BID_ERROR,
+      (message: PlaceBidErrorEvent) => {
+        void (async () => {
+          try {
+            if (!message) return;
+            const { auctionId, userId, type, reason, amount } = message.payload;
 
-          const clientId =
-            await this.auctionService.getClientIdForUserIdAndAuctionId(
-              userId,
+            const clientId =
+              await this.auctionService.getClientIdForUserIdAndAuctionId(
+                userId,
+                auctionId,
+              );
+            if (!clientId) return;
+
+            this.server.to(clientId).emit(WEBSOCKET_EVENTS.BID_ERROR, {
               auctionId,
-            );
-          if (!clientId) return;
-
-          this.server.to(clientId).emit('bidError', {
-            auctionId,
-            type,
-            reason,
-            amount,
-          });
-        } catch (err) {
-          this.logger.error(`Failed to handle bid-error message`, err);
-        }
-      })();
-    });
+              type,
+              reason,
+              amount,
+            });
+          } catch (err) {
+            this.logger.error(`Failed to handle bid-error message`, err);
+          }
+        })();
+      },
+    );
   }
 
   @SubscribeMessage('joinAuction')

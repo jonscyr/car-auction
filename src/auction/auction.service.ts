@@ -4,6 +4,7 @@ import { RedisService } from '../common/redis/redis.service';
 import { RabbitMQService } from 'src/common/rabbitmq/rabbitmq.service';
 import { Auction } from './types';
 import { RedisPubSubService } from 'src/common/redis/redis.pubsub.service';
+import { PUBSUB_EVENTS } from 'src/pubsub.events';
 
 const DEFAULT_ACTION_CACHE_TTL = 300;
 
@@ -93,7 +94,10 @@ export class AuctionService {
     // Map client to user id map
     await redis.set(`client:${clientId}:user`, userId);
 
-    await this.redisPubSub.publish('user-joins', { auctionId, userId });
+    await this.redisPubSub.publish(PUBSUB_EVENTS.USER_JOINS, {
+      auctionId,
+      userId,
+    });
   }
 
   async removeUserFromRoom(auctionId: string, userId: string) {
@@ -114,7 +118,10 @@ export class AuctionService {
     await redis.del(this.getUserClientsKey(userId));
 
     // Publish leave event
-    await this.redisPubSub.publish('user-leaves', { auctionId, userId });
+    await this.redisPubSub.publish(PUBSUB_EVENTS.USER_LEAVES, {
+      auctionId,
+      userId,
+    });
   }
 
   async isUserInRoom(auctionId: string, userId: string): Promise<boolean> {
@@ -158,7 +165,7 @@ export class AuctionService {
           const auctionId = auctionIdMatch ? auctionIdMatch[1] : null;
 
           if (auctionId) {
-            await this.redisPubSub.publish('user-leaves', {
+            await this.redisPubSub.publish(PUBSUB_EVENTS.USER_LEAVES, {
               auctionId,
               userId,
             });

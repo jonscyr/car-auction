@@ -3,6 +3,8 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { RabbitMQService } from 'src/common/rabbitmq/rabbitmq.service';
 import { RedisPubSubService } from 'src/common/redis/redis.pubsub.service';
 import { Channel, ConsumeMessage } from 'amqplib';
+import { QUEUING } from 'src/rabbitmq.events';
+import { PUBSUB_EVENTS } from 'src/pubsub.events';
 
 @Injectable()
 export class BidFeedbackService implements OnModuleInit {
@@ -17,10 +19,8 @@ export class BidFeedbackService implements OnModuleInit {
   async onModuleInit() {
     this.channel = await this.rabbitMQService.connection.createChannel();
 
-    await this.channel.assertQueue('notification-queue', { durable: true });
-
     await this.channel.consume(
-      'notification-queue',
+      QUEUING.QUEUES.NOTIF_Q,
       this.handleNotification.bind(this),
       { noAck: false },
     );
@@ -36,7 +36,7 @@ export class BidFeedbackService implements OnModuleInit {
       this.logger.log(`Received Notification: ${JSON.stringify(content)}`);
 
       // Publish to Redis Pub/Sub channel
-      await this.redisPubSubService.publish('bid-error', content);
+      await this.redisPubSubService.publish(PUBSUB_EVENTS.BID_ERROR, content);
 
       this.channel.ack(msg);
     } catch (error) {

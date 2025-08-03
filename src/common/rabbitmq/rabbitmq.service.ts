@@ -18,8 +18,6 @@ export class RabbitMQService implements OnModuleInit {
     const rawConnection = await connect(rabbitMQUrl);
     this.connection = rawConnection;
     this.channel = await this.connection.createChannel();
-
-    await this.channel.assertQueue('bid-processing-queue', { durable: true });
   }
 
   async registerConsumer(
@@ -45,15 +43,6 @@ export class RabbitMQService implements OnModuleInit {
         })();
       },
       { noAck: false },
-    );
-  }
-
-  async publishToQueue(queue: string, message: any) {
-    // await this.channel.assertQueue(queue, { durable: true });
-    this.channel.publish(
-      'auction.exchange',
-      queue,
-      Buffer.from(JSON.stringify(message)),
     );
   }
 }

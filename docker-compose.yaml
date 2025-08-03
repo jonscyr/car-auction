@@ -26,10 +26,15 @@ services:
     image: rabbitmq:3-management
     ports:
       - "5672:5672"
-      - "15672:15672" # RabbitMQ Management UI
+      - "15672:15672"  # UI
     environment:
       RABBITMQ_DEFAULT_USER: guest
       RABBITMQ_DEFAULT_PASS: guest
+    command: >
+      bash -c "
+        rabbitmq-plugins enable rabbitmq_consistent_hash_exchange &&
+        rabbitmq-server
+      "
 
 volumes:
   pgdata:

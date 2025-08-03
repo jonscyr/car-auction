@@ -6,6 +6,11 @@ import { AuctionService } from 'src/auction/auction.service';
 import { RabbitMQService } from 'src/common/rabbitmq/rabbitmq.service';
 import { RedisPubSubService } from 'src/common/redis/redis.pubsub.service';
 import { RedisService } from 'src/common/redis/redis.service';
+import { setupQueuesAndExchanges } from './queueing.setup';
+import { ConfigService } from '@nestjs/config';
+import { PUBSUB_EVENTS } from 'src/pubsub.events';
+import { PlaceBidErrorEvent, PlaceBidEvent } from 'src/rabbitmq.events';
+import { QUEUING } from 'src/rabbitmq.events';
 
 @Injectable()
 export class BidService {
@@ -18,66 +23,22 @@ export class BidService {
     private readonly redisCache: RedisService,
     private readonly redisPubSubService: RedisPubSubService,
     private readonly auctionService: AuctionService,
+    private readonly configService: ConfigService,
   ) {}
 
   async onModuleInit() {
     this.channel = await this.rabbitMQService.connection.createChannel();
-    await this.rabbitMQService.registerConsumer(
-      'bid-processing-queue',
-      this.handleBidProcessing.bind(this),
+    await setupQueuesAndExchanges(this.channel);
+    const consumerQueueId = this.configService.get<number | null>(
+      'CONSUMER_QUEUE_ID',
     );
-
-    // Declare exchanges.
-    // separate exchange for auditing so that we can do exchange to exchange binding
-    await this.channel.assertExchange('auction.exchange', 'direct', {
-      durable: true,
-    });
-    await this.channel.assertExchange('audit.fanout.exchange', 'fanout', {
-      durable: true,
-    });
-
-    // Queues
-    await this.channel.assertQueue('bid-processing-queue', { durable: true });
-    await this.channel.assertQueue('notification-queue', { durable: true });
-    await this.channel.assertQueue('audit-queue', { durable: true });
-
-    // Bind Queues to auction.exchange (direct routing)
-    await this.channel.bindQueue(
-      'bid-processing-queue',
-      'auction.exchange',
-      'bid',
-    );
-    await this.channel.bindQueue(
-      'notification-queue',
-      'auction.exchange',
-      'notification',
-    );
-
-    // Bind audit-queue to audit.fanout.exchange
-    await this.channel.bindQueue('audit-queue', 'audit.fanout.exchange', '');
-
-    // Exchange-to-Exchange Binding: auction.exchange → audit.fanout.exchange
-    await this.channel.bindExchange(
-      'audit.fanout.exchange',
-      'auction.exchange',
-      '',
-    );
+    if (typeof consumerQueueId === 'number' && !isNaN(consumerQueueId)) {
+      await this.rabbitMQService.registerConsumer(
+        QUEUING.QUEUES.BID_PROCESSING_PREFIX + consumerQueueId,
+        this.handleBidProcessing.bind(this),
+      );
+    }
   }
-
-  // publishBidEvent(message: any) {
-  //   const payload = Buffer.from(JSON.stringify(message));
-  //   this.channel.publish('auction.exchange', 'bid', payload);
-  // }
-
-  // publishNotificationEvent(message: any) {
-  //   const payload = Buffer.from(JSON.stringify(message));
-  //   this.channel.publish('auction.exchange', 'notification', payload);
-  // }
-
-  // publishAuditEvent(message: any) {
-  //   const payload = Buffer.from(JSON.stringify(message));
-  //   this.channel.publish('auction.exchange', 'audit', payload);
-  // }
 
   async getCurrentHighestBid(auctionId: string): Promise<number | null> {
     const bid = await this.redisCache.client.get(
@@ -116,20 +77,24 @@ export class BidService {
     // Push the bid event to RabbitMQ for persistence and audit trail
     const payload = Buffer.from(
       JSON.stringify({
-        auctionId,
-        userId,
-        bidAmount: amount,
+        eventType: 'PLACE_BID',
+        payload: {
+          auctionId,
+          userId,
+          bidAmount: amount,
+        },
         timestamp: Date.now(),
-      }),
+      } as PlaceBidEvent),
     );
-    this.channel.publish('auction.exchange', 'bid', payload, {
+    this.channel.publish(QUEUING.EXCHANGES.BID_X, auctionId, payload, {
       persistent: true, // Ensure message survives broker restarts
     });
   }
 
   private async handleBidProcessing(msg: ConsumeMessage) {
     if (!msg) return;
-    const { auctionId, userId, bidAmount } = JSON.parse(msg.content.toString());
+    const parsedMsg = JSON.parse(msg.content.toString()) as PlaceBidEvent; // TODO: use typeguards;
+    const { auctionId, userId, bidAmount } = parsedMsg.payload;
     try {
       await this.prisma.$transaction(async (tx) => {
         // 1. Fetch the current auction row
@@ -187,28 +152,36 @@ export class BidService {
       await this.updateHighestBid(auctionId, bidAmount, userId);
 
       // Notify all WebSocket clients
-      await this.redisPubSubService.publish('bid-updates', {
+      await this.redisPubSubService.publish(PUBSUB_EVENTS.BID_UPDATES, {
         auctionId,
         bidAmount,
         userId,
       });
     } catch (error) {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
       this.logger.error(`Bid processing failed: ${error.message}`, error.stack);
 
       // Conflict/Error Notification
       // we could also directly publish to redis pubsub for immediate feedback
       this.channel.publish(
-        'auction.exchange',
-        'notification',
+        QUEUING.EXCHANGES.NOTIF_X,
+        '',
         Buffer.from(
           JSON.stringify({
-            auctionId,
-            amount: bidAmount,
-            reason: error.message,
-            userId,
-            type:
-              error instanceof ConflictException ? 'BID_CONFLICT' : 'BID_ERROR',
-          }),
+            timestamp: Date.now(),
+            eventType: 'PLACE_BID_ERROR',
+            payload: {
+              auctionId,
+              amount: bidAmount,
+              // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+              reason: error.message,
+              userId,
+              type:
+                error instanceof ConflictException
+                  ? 'BID_CONFLICT'
+                  : 'BID_ERROR',
+            },
+          } as PlaceBidErrorEvent),
         ),
       );
     }

@@ -35,3 +35,14 @@ model Bid {
   User      User     @relation(fields: [userId], references: [id])
   Auction   Auction  @relation(fields: [auctionId], references: [id])
 }
+
+model AuditLog {
+  id          Int      @id @default(autoincrement())
+  eventType   String
+  payload     Json
+  timestamp   DateTime
+  receivedAt  DateTime @default(now())
+
+  @@index([eventType])
+  @@index([timestamp])
+}
