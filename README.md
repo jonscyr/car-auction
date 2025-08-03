@@ -4,7 +4,8 @@
 2. The auth mechanisms and apis for auction and user managements are already present.
 
 ## Notes
-1. Please refere exchange setup png for how exchanges and queues are setup. 
+1. exchanges and queues.
+    - ![Alt text](https://raw.githubusercontent.com/jonscyr/car-auction/refs/heads/main/exchange%20setup.png)
 2. This app can do two jobs
     1. The gateway for accepting requests.
     2. the consumer for processing bids.
