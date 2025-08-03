@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { ConflictException, Injectable, Logger } from '@nestjs/common';
 import { WsException } from '@nestjs/websockets';
 import { PrismaClient } from '@prisma/client';
 import { Channel, ConsumeMessage } from 'amqplib';
@@ -118,7 +118,7 @@ export class BidService {
       JSON.stringify({
         auctionId,
         userId,
-        amount,
+        bidAmount: amount,
         timestamp: Date.now(),
       }),
     );
@@ -128,29 +128,89 @@ export class BidService {
   }
 
   private async handleBidProcessing(msg: ConsumeMessage) {
-    if (!msg) {
-      return;
-    }
-    const { auctionId, userId, amount } = JSON.parse(msg.content.toString());
+    if (!msg) return;
+    const { auctionId, userId, bidAmount } = JSON.parse(msg.content.toString());
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        // 1. Fetch the current auction row
+        const auction = await tx.auction.findUnique({
+          where: { id: auctionId },
+          select: {
+            id: true,
+            currentHighestBid: true,
+            status: true,
+          },
+        });
 
-    // Save the bid in the Bids table
-    await this.prisma.bid.create({
-      data: {
+        if (!auction) {
+          throw new Error('Auction not found');
+        }
+
+        if (auction.status !== 'ONGOING') {
+          throw new ConflictException('Auction is not active');
+        }
+
+        if (
+          auction.currentHighestBid &&
+          bidAmount <= auction.currentHighestBid
+        ) {
+          throw new ConflictException(
+            'Bid amount must be higher than current highest bid',
+          );
+        }
+
+        // 2. Update auction's highest bid and winner (Optimistic Locking)
+        await tx.auction.update({
+          where: {
+            id: auctionId,
+          },
+          data: {
+            currentHighestBid: bidAmount,
+            winnerId: userId,
+          },
+        });
+
+        // 3. Insert the bid into Bids table
+        const bid = await tx.bid.create({
+          data: {
+            auctionId,
+            userId,
+            amount: bidAmount,
+            timestamp: new Date(),
+          },
+        });
+
+        return bid;
+      });
+
+      // Update Redis cache
+      await this.updateHighestBid(auctionId, bidAmount, userId);
+
+      // Notify all WebSocket clients
+      await this.redisPubSubService.publish('bid-updates', {
         auctionId,
+        bidAmount,
         userId,
-        amount,
-        timestamp: new Date(),
-      },
-    });
+      });
+    } catch (error) {
+      this.logger.error(`Bid processing failed: ${error.message}`, error.stack);
 
-    // Update Redis cache
-    await this.updateHighestBid(auctionId, amount, userId);
-
-    // Notify all WebSocket clients
-    await this.redisPubSubService.publish('bid-updates', {
-      auctionId,
-      bidAmount: amount,
-      userId,
-    });
+      // Conflict/Error Notification
+      // we could also directly publish to redis pubsub for immediate feedback
+      this.channel.publish(
+        'auction.exchange',
+        'notification',
+        Buffer.from(
+          JSON.stringify({
+            auctionId,
+            amount: bidAmount,
+            reason: error.message,
+            userId,
+            type:
+              error instanceof ConflictException ? 'BID_CONFLICT' : 'BID_ERROR',
+          }),
+        ),
+      );
+    }
   }
 }

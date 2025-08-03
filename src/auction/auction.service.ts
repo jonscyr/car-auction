@@ -171,6 +171,20 @@ export class AuctionService {
     }
   }
 
+  async getClientIdForUserIdAndAuctionId(userId: string, auctionId: string) {
+    const redis = this.redisService.client;
+    const clientIds = await redis.sMembers(this.getUserClientsKey(userId));
+
+    for (const clientId of clientIds) {
+      const clientAuctionId = await redis.get(
+        this.getClientAuctionKey(clientId),
+      );
+      if (clientAuctionId === auctionId) {
+        return clientId;
+      }
+    }
+  }
+
   //   async placeBid(auctionId: string, userId: string, bidAmount: number) {
   //     this.logger.log(
   //       `Placing bid for auction ${auctionId} by user ${userId}: $${bidAmount}`,

@@ -23,7 +23,6 @@ model Auction {
   currentHighestBid Float?
   winnerId          String?
   status            String
-  version           Int      @default(1)
   bids              Bid[]
 }
 

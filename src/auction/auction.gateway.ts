@@ -58,6 +58,30 @@ export class AuctionGateway {
       const { auctionId, finalBid } = message;
       this.server.to(`auction-${auctionId}`).emit('auctionEnd', { finalBid });
     });
+    await this.redisPubSubService.subscribe('bid-error', (message) => {
+      void (async () => {
+        try {
+          if (!message) return;
+          const { auctionId, userId, type, reason, amount } = message;
+
+          const clientId =
+            await this.auctionService.getClientIdForUserIdAndAuctionId(
+              userId,
+              auctionId,
+            );
+          if (!clientId) return;
+
+          this.server.to(clientId).emit('bidError', {
+            auctionId,
+            type,
+            reason,
+            amount,
+          });
+        } catch (err) {
+          this.logger.error(`Failed to handle bid-error message`, err);
+        }
+      })();
+    });
   }
 
   @SubscribeMessage('joinAuction')
@@ -87,7 +111,7 @@ export class AuctionGateway {
       client.id,
       user.id,
     );
-
+    this.logger.log(`Client join auction: ${client.id}, ${data.auctionId}`);
     // 2. respond ok
     client.emit('joinedAuction', JSON.stringify({ auctionId: data.auctionId }));
   }
@@ -111,6 +135,14 @@ export class AuctionGateway {
     @ConnectedSocket() client: AuthenticatedSocket,
   ) {
     const user = client.data.user;
+    const isInRoom = await this.auctionService.isUserInRoom(
+      data.auctionId,
+      user.id,
+    );
+    if (!isInRoom) {
+      // this.logger.warn('User is not in the auction room.');
+      throw new WsException('User is not in the auction room');
+    }
     // rabbitmq
     await this.bidService.placeBid(data.auctionId, user.id, data.bidAmount);
     client.emit('bidPlaced', { status: 'success', bidAmount: data.bidAmount });
