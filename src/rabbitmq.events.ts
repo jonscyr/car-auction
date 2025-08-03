@@ -4,6 +4,7 @@ export const QUEUING = {
     BID_HASH_X: 'bid.hash.x',
     AUDIT_FANOUT_X: 'audit.fanout.x',
     NOTIF_X: 'notification.x',
+    BID_PROCESSING_DLX: 'bid-processing.dlx',
   },
   QUEUES: {
     BID_PROCESSING_PREFIX: 'bid-processing-',

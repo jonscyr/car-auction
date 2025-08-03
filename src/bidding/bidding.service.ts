@@ -28,7 +28,10 @@ export class BidService {
 
   async onModuleInit() {
     this.channel = await this.rabbitMQService.connection.createChannel();
-    await setupQueuesAndExchanges(this.channel);
+    const numberOfBidQueues = this.configService.get<number | null>(
+      'N_CONSUMERS',
+    );
+    await setupQueuesAndExchanges(this.channel, numberOfBidQueues);
     const consumerQueueId = this.configService.get<number | null>(
       'CONSUMER_QUEUE_ID',
     );
@@ -41,10 +44,33 @@ export class BidService {
   }
 
   async getCurrentHighestBid(auctionId: string): Promise<number | null> {
-    const bid = await this.redisCache.client.get(
-      `auction:${auctionId}:highestBid`,
-    );
-    return bid ? parseFloat(bid) : null;
+    const cacheKey = `auction:${auctionId}:highestBid`;
+
+    const cachedBid = await this.redisCache.client.get(cacheKey);
+    if (cachedBid) {
+      return parseFloat(cachedBid);
+    }
+
+    // Cache miss -> from db
+    const auction = await this.prisma.auction.findUnique({
+      where: { id: auctionId },
+      select: { currentHighestBid: true },
+    });
+
+    if (auction && auction.currentHighestBid !== null) {
+      // Populate Cache
+      await this.redisCache.client.set(
+        cacheKey,
+        auction.currentHighestBid.toString(),
+        {
+          EX: 60, // Optional TTL
+        },
+      );
+      return auction.currentHighestBid;
+    }
+
+    // No bid found
+    return null;
   }
 
   async updateHighestBid(auctionId: string, bidAmount: number, userId: string) {
@@ -115,6 +141,11 @@ export class BidService {
           throw new ConflictException('Auction is not active');
         }
 
+        /**
+         * We can use cache also here since cache is in sync.
+         * But since we want to do optimistic concurrency control, we might want to check
+         * with db again, we can also use versioning on auditLog
+         */
         if (
           auction.currentHighestBid &&
           bidAmount <= auction.currentHighestBid
@@ -124,14 +155,14 @@ export class BidService {
           );
         }
 
-        // 2. Update auction's highest bid and winner (Optimistic Locking)
+        // 2. Update auction's highest bid and winner
         await tx.auction.update({
           where: {
             id: auctionId,
           },
           data: {
             currentHighestBid: bidAmount,
-            winnerId: userId,
+            winnerId: userId, // TODO: winnerId to be set at auction END.
           },
         });
 
