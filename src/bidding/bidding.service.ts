@@ -191,6 +191,32 @@ export class BidService {
         userId,
       });
     } catch (error) {
+      // dont retry if conflicted
+      if (error instanceof ConflictException) {
+        this.channel.publish(
+          QUEUING.EXCHANGES.NOTIF_X,
+          '',
+          Buffer.from(
+            JSON.stringify({
+              timestamp: Date.now(),
+              eventType: 'PLACE_BID_ERROR',
+              payload: {
+                auctionId,
+                amount: bidAmount,
+                reason: error.message,
+                userId,
+                type:
+                  error instanceof ConflictException
+                    ? 'BID_CONFLICT'
+                    : 'BID_ERROR',
+              },
+            } as PlaceBidErrorEvent),
+          ),
+        );
+        this.channel.ack(msg);
+        return;
+      }
+
       // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
       this.logger.error(`Bid processing failed: ${error.message}`, error.stack);
       if (retryCount < MAX_RETRIES) {
@@ -208,27 +234,6 @@ export class BidService {
       }
       // Conflict/Error Notification
       // we could also directly publish to redis pubsub for immediate feedback
-      this.channel.publish(
-        QUEUING.EXCHANGES.NOTIF_X,
-        '',
-        Buffer.from(
-          JSON.stringify({
-            timestamp: Date.now(),
-            eventType: 'PLACE_BID_ERROR',
-            payload: {
-              auctionId,
-              amount: bidAmount,
-              // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-              reason: error.message,
-              userId,
-              type:
-                error instanceof ConflictException
-                  ? 'BID_CONFLICT'
-                  : 'BID_ERROR',
-            },
-          } as PlaceBidErrorEvent),
-        ),
-      );
     }
   }
 }
